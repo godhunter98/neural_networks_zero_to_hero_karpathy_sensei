@@ -83,11 +83,12 @@ class MultiHeadAttention(nn.Module):
     def __init__(self,num_heads,head_size) -> None:
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.proj = nn.Linear(n_embd,n_embd)
     
     def forward(self,x):
-        return torch.cat([h(x) for h in self.heads],dim=-1)
-    
-    
+        out = torch.cat([h(x) for h in self.heads],dim=-1)
+        out = self.proj(out) #we project because we want to fork-off to do some computation, then merge it into the residual connection
+        return out
 class FeedForward(nn.Module):
     '''Simple linear layer followed by a non-linearity'''
     # FF applies a mini brain only to that token, with no interaction with others
@@ -98,7 +99,7 @@ class FeedForward(nn.Module):
         super().__init__()
         # expands, activates, compresses. Like thinking hard then summarizing.
         self.net = nn.Sequential(
-            nn.Linear(n_embd,4*n_embd), # After the tokens have communicated via attention we want the tokens to think, and to do it we project the embedding into a 4X dimension vector
+            nn.Linear(n_embd,4*n_embd), # After the tokens have communicated via attention we want the tokens to think, and to do it we project the embedding into a 4X dimension vector , basically increase the computation width
             nn.ReLU(),  # Non-linearity to capture complex interactions
             nn.Linear(4*n_embd,n_embd) # And then collapse it back.
         )
@@ -115,10 +116,12 @@ class Block(nn.Module):
         head_size = n_embd//n_head
         self.sa = MultiHeadAttention(n_head,head_size) #i.e 4 heads of 8-dimensional heads
         self.ffwd = FeedForward(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd) #prenorm-formulation
+        self.ln2 = nn.LayerNorm(n_embd) #layernorm is done per-feature, i.e mean and variance is calculated each token across 32dim vectors
     
     def forward(self,x):
-        x = self.sa(x)
-        x = self.ffwd(x)
+        x = x + self.sa(self.ln1(x)) #intiating skip connections
+        x = x + self.ffwd(self.ln2(x)) #intiating skip connections 
         return x
 
 class BigramLanguageModel(nn.Module):
@@ -131,7 +134,8 @@ class BigramLanguageModel(nn.Module):
         self.blocks = nn.Sequential(
             Block(n_embd,4),
             Block(n_embd,4),
-            Block(n_embd,4)
+            Block(n_embd,4),
+            nn.LayerNorm(n_embd)
         )
         self.lm_head = nn.Linear(n_embd,vocab_size) #the last linear layer to map back to vocab size
 
