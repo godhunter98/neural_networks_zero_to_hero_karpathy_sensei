@@ -84,7 +84,7 @@ class Head(nn.Module):
 
         wei = q @ k.transpose(-2,-1) * (self.head_size**-0.5) # B,T,C @ B,C,T => # B,T,T #we also a add a normalisation term 
         wei = wei.masked_fill(self.tril[:T,:T]==0,float('-inf')) # type: ignore # B,T,T
-        wei = F.softmax(wei,dim=1) # B,T,T
+        wei = F.softmax(wei,dim=-1) # B,T,T
         wei = self.dropout(wei)
 
         out = wei @ v # B,T,T @ B,T,C => B,T,C
